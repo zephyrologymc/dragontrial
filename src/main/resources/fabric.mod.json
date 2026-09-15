@@ -1,0 +1,37 @@
+{
+	"schemaVersion": 1,
+	"id": "dragontrial",
+	"version": "${version}",
+	"name": "Dragon Trial",
+	"description": "can these dragons please work god please",
+	"authors": [
+		"zephyrology"
+	],
+	"contact": {
+		"homepage": "https://fabricmc.net/",
+		"sources": "https://github.com/FabricMC/fabric-example-mod"
+	},
+	"license": "MIT",
+	"icon": "assets/dragontrial/icon.png",
+	"environment": "*",
+	"entrypoints": {
+		"main": [
+			"net.zephyrology.dragontrial.DragonTrial1"
+		],
+		"fabric-datagen": [
+			"net.zephyrology.dragontrial.DragonTrial1DataGenerator"
+		],
+		"client": [
+			"net.zephyrology.dragontrial.DragonTrial1Client"
+		]
+	},
+	"mixins": [
+		"dragontrial.mixins.json"
+	],
+	"depends": {
+		"fabricloader": ">=0.19.5",
+		"minecraft": "~1.21.1",
+		"java": ">=21",
+		"fabric-api": "*"
+	}
+}
