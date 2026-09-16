@@ -51,7 +51,7 @@ public class DragonEntity extends TameableEntity implements GeoEntity {
                 .add(EntityAttributes.GENERIC_MAX_HEALTH, 20.0D)
                 .add(EntityAttributes.GENERIC_ATTACK_DAMAGE, 4.0f)
                 .add(EntityAttributes.GENERIC_ATTACK_SPEED, 2.0f)
-                .add(EntityAttributes.GENERIC_MOVEMENT_SPEED, 0.2f);
+                .add(EntityAttributes.GENERIC_MOVEMENT_SPEED, 0.3f);
 
 
     }
@@ -62,10 +62,10 @@ public class DragonEntity extends TameableEntity implements GeoEntity {
         this.goalSelector.add(1, new SwimGoal(this));
         this.goalSelector.add(2, new TameableEntity.TameableEscapeDangerGoal(1.5, DamageTypeTags.PANIC_ENVIRONMENTAL_CAUSES));
         this.goalSelector.add(3, new SitGoal(this));
-        this.goalSelector.add(5, new FollowOwnerGoal(this, 1.0, 3.0F, 2.0F));
-        this.goalSelector.add(6, this.temptGoal);
-        this.goalSelector.add(7, new LookAtEntityGoal(this, PlayerEntity.class, 1.0F));
-        this.goalSelector.add(8, new LookAroundGoal(this));
+        this.goalSelector.add(4, new FollowOwnerGoal(this, 0.85, 3.0F, 1.0F));
+        this.goalSelector.add(5, this.temptGoal);
+        this.goalSelector.add(6, new LookAtEntityGoal(this, PlayerEntity.class, 3.0F));
+        this.goalSelector.add(7, new LookAroundGoal(this));
 
     }
 
@@ -88,9 +88,6 @@ public class DragonEntity extends TameableEntity implements GeoEntity {
         super.setTamed(tamed, updateAttributes);
     }
 
-    public void setOwnerUuid(@Nullable UUID uuid) {
-        this.dataTracker.set(OWNER_UUID, Optional.ofNullable(uuid));
-    }
 
     @Override
     public void registerControllers(AnimatableManager.ControllerRegistrar controllers) {
@@ -112,13 +109,18 @@ public class DragonEntity extends TameableEntity implements GeoEntity {
                     return ActionResult.success(this.getWorld().isClient());
                 }
 
-                ActionResult actionResult = super.interactMob(player, hand);
-                if (!actionResult.isAccepted()) {
-                    this.setSitting(!this.isSitting());
+                if (hand == Hand.MAIN_HAND) {
+                    if (!this.getWorld().isClient()) {
+                        boolean sit = !this.isSitting();
+                        this.setInSittingPose(sit);
+                        this.setSitting(sit);
+                        this.navigation.stop();
+                        this.setTarget(null);
+                    }
                     return ActionResult.success(this.getWorld().isClient());
                 }
 
-                return actionResult;
+
             }
         } else if (this.isBreedingItem(itemStack)) {
             if (!this.getWorld().isClient()) {
@@ -151,6 +153,7 @@ public class DragonEntity extends TameableEntity implements GeoEntity {
             this.setOwner(player);
             this.navigation.stop();
             this.setTarget(null);
+            this.setInSittingPose(true);
             this.setSitting(true);
             this.getWorld().sendEntityStatus(this, EntityStatuses.ADD_POSITIVE_PLAYER_REACTION_PARTICLES);
         } else {
@@ -164,13 +167,14 @@ public class DragonEntity extends TameableEntity implements GeoEntity {
 
     private PlayState predicate(software.bernie.geckolib.animation.AnimationState<GeoAnimatable> geoAnimatableAnimationState) {
 
-        if(geoAnimatableAnimationState.isMoving()){
-            geoAnimatableAnimationState.getController().setAnimation(RawAnimation.begin().thenLoop("animation.walk"));
+        if(this.isInSittingPose()){
+            geoAnimatableAnimationState.getController().setAnimation(RawAnimation.begin().then("animation.sit", Animation.LoopType.PLAY_ONCE).thenLoop("animation.seated"));
             return PlayState.CONTINUE;
         }
 
-        if(this.isSitting()){
-            geoAnimatableAnimationState.getController().setAnimation(RawAnimation.begin().then("animation.sit", Animation.LoopType.PLAY_ONCE).thenLoop("animation.seated"));
+
+        if(geoAnimatableAnimationState.isMoving()){
+            geoAnimatableAnimationState.getController().setAnimation(RawAnimation.begin().thenLoop("animation.walk"));
             return PlayState.CONTINUE;
         }
 
