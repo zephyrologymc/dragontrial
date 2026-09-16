@@ -11,7 +11,7 @@ import net.zephyrology.dragontrial.DragonTrial1;
 
 public class ModItemGroups {
 
-    public static final ItemGroup PINK_GARNET_ITEMS_GROUP = Registry.register(Registries.ITEM_GROUP,
+    public static final ItemGroup DRAGON_ITEMS_GROUP = Registry.register(Registries.ITEM_GROUP,
             Identifier.of(DragonTrial1.MOD_ID, "dragons"),
             FabricItemGroup.builder().icon(() -> new ItemStack(ModItems.DRAGON_SPAWN_EGG))
                     .displayName(Text.translatable("itemgroup.dragontrial.dragons"))
