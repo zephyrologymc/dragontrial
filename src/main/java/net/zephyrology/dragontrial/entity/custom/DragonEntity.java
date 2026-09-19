@@ -1,28 +1,34 @@
 package net.zephyrology.dragontrial.entity.custom;
 
+import net.minecraft.block.BlockState;
 import net.minecraft.component.DataComponentTypes;
-import net.minecraft.component.EnchantmentEffectComponentTypes;
 import net.minecraft.component.type.FoodComponent;
-import net.minecraft.enchantment.EnchantmentHelper;
 import net.minecraft.entity.EntityStatuses;
 import net.minecraft.entity.EntityType;
+import net.minecraft.entity.ItemEntity;
+import net.minecraft.entity.LivingEntity;
 import net.minecraft.entity.ai.goal.*;
 import net.minecraft.entity.attribute.DefaultAttributeContainer;
 import net.minecraft.entity.attribute.EntityAttributes;
+import net.minecraft.entity.effect.StatusEffectInstance;
+import net.minecraft.entity.effect.StatusEffects;
 import net.minecraft.entity.mob.MobEntity;
+import net.minecraft.entity.mob.PathAwareEntity;
+import net.minecraft.entity.passive.CatEntity;
 import net.minecraft.entity.passive.PassiveEntity;
 import net.minecraft.entity.passive.TameableEntity;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.item.*;
-import net.minecraft.registry.DefaultedRegistry;
+import net.minecraft.registry.tag.BlockTags;
 import net.minecraft.registry.tag.DamageTypeTags;
 import net.minecraft.registry.tag.ItemTags;
 import net.minecraft.server.world.ServerWorld;
-import net.minecraft.sound.SoundEvents;
+import net.minecraft.text.Text;
 import net.minecraft.util.ActionResult;
-import net.minecraft.util.DyeColor;
 import net.minecraft.util.Hand;
+import net.minecraft.util.math.BlockPos;
 import net.minecraft.world.World;
+import net.minecraft.world.WorldView;
 import net.zephyrology.dragontrial.entity.ModEntities;
 import org.jetbrains.annotations.Nullable;
 import software.bernie.geckolib.animatable.GeoAnimatable;
@@ -31,7 +37,7 @@ import software.bernie.geckolib.animatable.instance.AnimatableInstanceCache;
 import software.bernie.geckolib.animation.*;
 import software.bernie.geckolib.util.GeckoLibUtil;
 
-import java.util.Optional;
+import java.util.EnumSet;
 import java.util.UUID;
 import java.util.function.Predicate;
 
@@ -40,6 +46,11 @@ public class DragonEntity extends TameableEntity implements GeoEntity {
     private AnimatableInstanceCache cache = GeckoLibUtil.createInstanceCache(this);
     @Nullable
     private net.minecraft.entity.ai.goal.TemptGoal temptGoal;
+    private WanderAroundFarGoal wanderAround;
+    private static final net.minecraft.entity.data.TrackedData<Boolean> SLEEPING_ON_BED =
+            net.minecraft.entity.data.DataTracker.registerData(DragonEntity.class, net.minecraft.entity.data.TrackedDataHandlerRegistry.BOOLEAN);
+
+
 
 
     public DragonEntity(EntityType<? extends TameableEntity> entityType, World world) {
@@ -62,10 +73,12 @@ public class DragonEntity extends TameableEntity implements GeoEntity {
         this.goalSelector.add(1, new SwimGoal(this));
         this.goalSelector.add(2, new TameableEntity.TameableEscapeDangerGoal(1.5, DamageTypeTags.PANIC_ENVIRONMENTAL_CAUSES));
         this.goalSelector.add(3, new SitGoal(this));
-        this.goalSelector.add(4, new FollowOwnerGoal(this, 0.85, 3.0F, 1.0F));
-        this.goalSelector.add(5, this.temptGoal);
-        this.goalSelector.add(6, new LookAtEntityGoal(this, PlayerEntity.class, 3.0F));
-        this.goalSelector.add(7, new LookAroundGoal(this));
+        this.goalSelector.add(4, new DragonEntity.SleepWithOwnerGoal(this));
+        this.goalSelector.add(5, new FollowOwnerGoal(this, 0.85, 3.0F, 1.0F));
+        this.goalSelector.add(6, this.temptGoal);
+        this.goalSelector.add(7, new GoToBedAndSleepGoal(this, 1.1, 8));
+        this.goalSelector.add(8, new LookAtEntityGoal(this, PlayerEntity.class, 3.0F));
+        this.goalSelector.add(9, new LookAroundGoal(this));
 
     }
 
@@ -108,6 +121,44 @@ public class DragonEntity extends TameableEntity implements GeoEntity {
 
                     return ActionResult.success(this.getWorld().isClient());
                 }
+
+
+
+                if (this.isZoomiesItem(itemStack) && !this.isSitting() && this.isOwner(player) && this.wanderAround!=null){
+                    this.eat(player, hand, itemStack);
+
+                    int durationInTicks = 10 * 20;
+                    int amplifier = 3;
+
+                    this.addStatusEffect(new StatusEffectInstance(
+                            StatusEffects.SPEED,
+                            durationInTicks,
+                            amplifier));
+
+                    return ActionResult.success(this.getWorld().isClient());
+                }
+
+
+                if (this.isWanderItem(itemStack) && !this.isSitting() && this.isOwner(player)){
+                    this.eat(player, hand, itemStack);
+
+                    if (this.wanderAround == null){
+                       this.wanderAround = new WanderAroundFarGoal(this, 1.0);
+                       this.goalSelector.add(2, this.wanderAround);
+                        player.sendMessage(Text.literal("Wander Mode ON"), true);
+                    } else {
+                        this.goalSelector.remove(this.wanderAround);
+                        this.wanderAround = null;
+                        player.sendMessage(Text.literal("Wander Mode OFF"), true);
+                    }
+
+
+
+
+                    return ActionResult.success(this.getWorld().isClient());
+                }
+
+
 
                 if (hand == Hand.MAIN_HAND) {
                     if (!this.getWorld().isClient()) {
@@ -167,6 +218,12 @@ public class DragonEntity extends TameableEntity implements GeoEntity {
 
     private PlayState predicate(software.bernie.geckolib.animation.AnimationState<GeoAnimatable> geoAnimatableAnimationState) {
 
+        if(this.isSleepingOnBed()){
+            geoAnimatableAnimationState.getController().setAnimation(RawAnimation.begin().thenLoop("animation.sleep"));
+            return PlayState.CONTINUE;
+        }
+
+
         if(this.isInSittingPose()){
             geoAnimatableAnimationState.getController().setAnimation(RawAnimation.begin().then("animation.sit", Animation.LoopType.PLAY_ONCE).thenLoop("animation.seated"));
             return PlayState.CONTINUE;
@@ -182,6 +239,113 @@ public class DragonEntity extends TameableEntity implements GeoEntity {
         return PlayState.CONTINUE;
     }
 
+    public boolean isSleepingOnBed() {
+        return this.dataTracker.get(SLEEPING_ON_BED);
+    }
+
+    public void setSleepingOnBed(boolean sleeping) {
+        this.dataTracker.set(SLEEPING_ON_BED, sleeping);
+    }
+
+    @Override
+    protected void initDataTracker(net.minecraft.entity.data.DataTracker.Builder builder) {
+        super.initDataTracker(builder);
+        builder.add(SLEEPING_ON_BED, false);
+    }
+
+
+    static class SleepWithOwnerGoal extends Goal {
+        private final DragonEntity dragon;
+        @Nullable
+        private PlayerEntity owner;
+        @Nullable
+        private BlockPos bedPos;
+        private int ticksOnBed;
+
+        public SleepWithOwnerGoal(DragonEntity dragon) {
+            this.dragon = dragon;
+        }
+
+        @Override
+        public boolean canStart() {
+            if (!this.dragon.isTamed()) {
+                return false;
+            }
+
+            if (this.dragon.isSitting()) {
+                return false;
+            }
+
+            LivingEntity livingEntity = this.dragon.getOwner();
+            if (livingEntity instanceof PlayerEntity) {
+                this.owner = (PlayerEntity)livingEntity;
+                if (!livingEntity.isSleeping()) {
+                    return false;
+                }
+
+                if (this.dragon.squaredDistanceTo(this.owner) > 100.0) {
+                    return false;
+                }
+
+                BlockPos blockPos = this.owner.getSleepingPosition().orElse(null);
+                if (blockPos != null && this.canSleepOn(this.dragon.getWorld(), blockPos)) {
+                    this.bedPos = blockPos;
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+
+        @Override
+        public boolean shouldContinue() {
+            return this.dragon.isTamed() && !this.dragon.isSitting() && this.owner != null && this.owner.isSleeping() && this.bedPos != null && this.canSleepOn(this.dragon.getWorld(), this.bedPos);
+        }
+
+        @Override
+        public void start() {
+            if (this.bedPos != null) {
+                this.dragon.setInSittingPose(false);
+                this.dragon.getNavigation().startMovingTo(this.bedPos.getX(), this.bedPos.getY(), this.bedPos.getZ(), 1.1F);
+            }
+        }
+
+        @Override
+        public void stop() {
+            this.dragon.setSleepingOnBed(false);
+            this.owner = null;
+            this.bedPos = null;
+            this.ticksOnBed = 0;
+        }
+
+
+        @Override
+        public void tick() {
+            if (this.owner == null || this.bedPos == null) return;
+
+            if (this.dragon.getBlockPos().isWithinDistance(this.bedPos, 2.0)) {
+                this.ticksOnBed++;
+                if (this.ticksOnBed >= 10) {
+                    this.dragon.setSleepingOnBed(true);
+                    this.dragon.getNavigation().stop();
+                } else {
+                    this.dragon.getNavigation().startMovingTo(this.owner, 1.1);
+                }
+            } else {
+                this.dragon.setSleepingOnBed(false);
+                this.dragon.getNavigation().startMovingTo(this.owner, 1.1);
+            }
+
+
+        }
+
+        private boolean canSleepOn(World world, BlockPos pos) {
+            BlockState blockState = world.getBlockState(pos);
+            return blockState.isIn(BlockTags.BEDS) && blockState.get(net.minecraft.state.property.Properties.BED_PART) == net.minecraft.block.enums.BedPart.HEAD;
+        }
+
+    }
 
 
 
@@ -196,6 +360,57 @@ public class DragonEntity extends TameableEntity implements GeoEntity {
         }
         }
 
+
+    public class GoToBedAndSleepGoal extends MoveToTargetPosGoal {
+        private final DragonEntity dragon;
+
+        public GoToBedAndSleepGoal(DragonEntity dragon, double speed, int range) {
+            super(dragon, speed, range, 6);
+            this.dragon = dragon;
+            this.lowestY = -2;
+            this.setControls(EnumSet.of(Goal.Control.JUMP, Goal.Control.MOVE));
+        }
+
+        @Override
+        public boolean canStart() {
+            return this.dragon.isTamed() && !this.dragon.isSitting() && !this.dragon.isSleepingOnBed() && super.canStart();
+        }
+
+        @Override
+        public void start() {
+            super.start();
+            this.dragon.setInSittingPose(false);
+        }
+
+        @Override
+        protected int getInterval(PathAwareEntity mob) {
+            return 40;
+        }
+
+        @Override
+        public void stop() {
+            super.stop();
+            this.dragon.setSleepingOnBed(false);
+        }
+
+        @Override
+        public void tick() {
+            super.tick();
+            this.dragon.setInSittingPose(false);
+            if (!this.hasReached()) {
+                this.dragon.setSleepingOnBed(false);
+            } else if (!this.dragon.isSleepingOnBed()) {
+                this.dragon.setSleepingOnBed(true);
+            }
+        }
+
+        @Override
+        protected boolean isTargetPos(WorldView world, BlockPos pos) {
+            return world.isAir(pos.up()) && world.getBlockState(pos).isIn(BlockTags.BEDS);
+        }
+    }
+
+
     @Override
     public AnimatableInstanceCache getAnimatableInstanceCache() {
         return cache;
@@ -205,5 +420,14 @@ public class DragonEntity extends TameableEntity implements GeoEntity {
     public boolean isBreedingItem(ItemStack stack) {
         return stack.isIn(ItemTags.CAT_FOOD);
     }
+
+    public boolean isZoomiesItem(ItemStack stack){
+        return stack.isOf(Items.SUGAR);
+    }
+
+    public boolean isWanderItem(ItemStack stack){
+        return stack.isOf(Items.GOLD_NUGGET);
+    }
+
 
 }
